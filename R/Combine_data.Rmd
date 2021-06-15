@@ -1,0 +1,278 @@
+---
+output: 
+  word_document:
+    reference_docx: report_template_v1.5.dotx
+---
+
+```{r setup, include=FALSE}
+
+
+# =======================================================================================
+# Combine_data.Rmd
+# 
+# 14/06/2021 First coding 
+# =======================================================================================
+
+require("knitr")
+knitr::opts_chunk$set(echo = FALSE,	message = FALSE,	warning = FALSE,	comment = "",	crop = TRUE )
+knitr::opts_chunk$set(fig.width=10) 
+
+rm(list=ls())
+
+options(dplyr.summarise.inform = FALSE)
+
+library(tidyverse)    # tidying packages
+library(readxl)       # read excel
+library(lubridate)
+library(scales)
+library(RColorBrewer)
+library(pander)
+library(viridis)
+
+source("theme_publication.r")
+source("lowcase.r")
+source("get_dropbox.r")
+source("loadRDataObject.r")
+source("encode_zchords.r")
+
+dropboxdir <- file.path(get_dropbox(), "SPFA-PFA_PandoraData")
+
+dx=1
+dy=0.5
+
+#load generic data
+load(file.path(dropboxdir,"rdata","world.df.RData"))
+load(file.path(dropboxdir,"rdata","fao.df.RData"))
+
+# load haul data of PFA and SPFA
+h1 <- loadRData(file.path(dropboxdir, "PFA data","pfa_20210413_haul_extraction_for_pandora.RData")) %>% 
+  mutate(
+    hid = paste(tid, stringr::str_pad(haul, width=3, pad="0"), sep="_"),
+    duration = as.numeric(difftime(haul_time, shoot_time, units="hours")),
+    year = lubridate::year(shoot_time), 
+    week = lubridate::week(shoot_time), 
+    rect   = encode_zchords(shootlon, shootlat, dx = dx, dy = dy),
+    source="pfa")
+
+h2 <- loadRData(file.path(dropboxdir, "SPFA data","spfa_ss_haul.RData")) %>% 
+  rename(
+    vid       = vssl, 
+    shoot_time= datetime, 
+    shootlon  = londd, 
+    shootlat  = latdd, 
+    date      = dte, 
+    catch     = est_catch, 
+    species   = sp) %>% 
+  mutate(
+    tid       = paste(vid, year, stringr::str_pad(trip, w=2, pad="0"), sep="_"),
+    hid       = paste(tid, stringr::str_pad(haul,w=2,pad="0")),
+    week      = lubridate::week(shoot_time), 
+    rect      = encode_zchords(shootlon, shootlat, dx = dx, dy = dy),
+    source    = "spfa", 
+    species   = tolower(species))
+
+h <- bind_rows(h1, h2)
+
+# find rectangle week combinations that are shared between PFA and SPFA
+h_common <-
+  h %>% 
+  group_by(year, week, rect, source) %>% 
+  summarise(
+    nhaul = n()
+  ) %>% 
+  group_by(year, week, rect) %>% 
+  filter(
+    n() == 2
+  ) %>% 
+  separate(rect, c("shootlon", "shootlat"), sep = ":", convert = TRUE, remove = FALSE)
+
+
+# load the length data
+l1 <- 
+  loadRData(file.path(dropboxdir, "PFA data","pfa_20210413_length_extraction_for_pandora.RData")) %>% 
+  filter(!is.na(shootlon)) %>% 
+  mutate(
+    hid      = paste(tid, stringr::str_pad(haul, width=3, pad="0"), sep="_"),
+    year     = lubridate::year(shoot_time), 
+    week     = lubridate::week(shoot_time), 
+    source   = "pfa"
+  ) %>% 
+  dplyr::select(-shootlat, -shootlon, -shoot_time) %>% 
+  ungroup()
+  
+l2 <- 
+  loadRData(file.path(dropboxdir, "SPFA data","spfa_ss_ltfreq.RData")) %>% 
+  rename(
+    vid       = vssl, 
+    date      = dte, 
+    length     = Length_cm, 
+    species   = sp) %>% 
+  mutate(
+    tid       = paste(vid, year, stringr::str_pad(trip, w=2, pad="0"), sep="_"),
+    hid       = paste(tid, stringr::str_pad(haul,w=2,pad="0")),
+    prop      = prop / 100, 
+    source    = "spfa", 
+    species   = tolower(species),
+    length    = floor(length)) %>% 
+  ungroup()
+
+l <-
+  h_common %>% 
+  dplyr::select(year, week, rect, shootlon, shootlat) %>% 
+  
+  # add haul information
+  left_join(dplyr::select(h, 
+                          source, vid, tid, hid, year, week, rect, shoot_time),
+            by=c("year","week","rect")) %>% 
+  ungroup() %>% 
+  
+  # add length information
+  left_join(dplyr::select(bind_rows(l1, l2),
+                          source, vid, tid, hid, species, length, count, prop), 
+            by=c("source", "vid","tid","hid")) %>% 
+  filter(!is.na(count)) %>% 
+  filter(!is.na(shootlat)) %>% 
+  
+  # summarize by source
+  group_by(year, week, rect, source, species, length) %>% 
+  summarise(
+    count = sum(count, na.rm=TRUE),
+    nhauls= n_distinct(hid)) %>% 
+  
+  group_by(year, week, rect, source, species) %>% 
+  mutate(prop = count/sum(count, na.rm=TRUE)) %>% 
+  
+  separate(rect, c("shootlon", "shootlat"), sep = ":", convert = TRUE, remove = FALSE)
+
+
+
+
+
+
+# load the bio data
+b1 <- loadRData(file.path(dropboxdir, "PFA data","pfa_20210413_bio_extraction_for_pandora.RData"))
+b2 <- loadRData(file.path(dropboxdir, "SPFA data","spfa_ss_bio.RData"))
+b <- bind_rows(b1, b2)
+
+
+  
+
+
+
+```
+
+PANDORA working document xx
+
+**Comparison of SPFA and PFA self-sampling data**
+
+Martin Pastoors, Katie Bridgen, Steve Mackinson
+
+`r format(Sys.time(), '%d/%m/%Y')`
+
+**Introduction**
+
+**Data and methods**
+
+**Results**
+
+Hauls in  (by year, week and rectangle)
+
+```{r, echo=FALSE, fig.asp=1.4, fig.align="center", message=FALSE, warning=FALSE}
+
+t <-
+  h %>% 
+  filter(week %in% 23:35) 
+
+xrange <- range(t$shootlon, na.rm=TRUE)
+yrange <- range(t$shootlat, na.rm=TRUE)
+  
+# Plot
+t %>%   
+  filter(source=="spfa") %>% 
+  ggplot(aes(shootlon, shootlat)) + 
+  theme_publication() +
+  theme(panel.border     = element_rect(colour="black" , size=0.2),
+        panel.grid.major = element_blank(),
+        strip.background = element_rect(colour="black", size =0.2),
+        plot.margin      = unit(c(0,0,0,0),"cm"),
+        plot.title       = element_text(vjust=0, size=10, hjust=0),
+        axis.text        = element_text(size=6),
+        axis.title       = element_blank(),
+        legend.key.width = unit(0.5, "cm")) +
+  
+  # coord_quickmap() +
+  coord_quickmap(xlim=xrange , ylim=yrange) +
+  geom_polygon(data=world.df, aes(long, lat, group=group), fill = "gray90") +
+  geom_point(aes(colour=source), alpha = 0.4, shape=20) +
+  # geom_text(data=tt, aes(label = paste("n=", n)), colour="black",
+  #           x=-Inf, y=Inf, hjust=0, vjust=1, size=3) +
+  scale_size(range = c(0.01,5)) +
+  guides(colour = guide_legend(nrow = 1)) + 
+  labs(x = NULL, y = NULL, size = "t/haul", title="Number of hauls") +
+  # facet_wrap(~ month, ncol=6)
+  facet_grid(year ~ week)
+
+
+
+```
+
+
+Hauls in common (by year, week and rectangle)
+
+```{r, echo=FALSE, fig.asp=1.4, fig.align="center", message=FALSE, warning=FALSE}
+
+t <-
+  h_common %>% 
+  filter(week %in% 23:35) 
+
+xrange <- range(t$shootlon, na.rm=TRUE)
+yrange <- range(t$shootlat, na.rm=TRUE)
+  
+# Plot
+t %>%   
+
+  ggplot(aes(shootlon, shootlat)) + 
+  theme_publication() +
+  theme(panel.border     = element_rect(colour="black" , size=0.2),
+        panel.grid.major = element_blank(),
+        strip.background = element_rect(colour="black", size =0.2),
+        plot.margin      = unit(c(0,0,0,0),"cm"),
+        plot.title       = element_text(vjust=0, size=10, hjust=0),
+        axis.text        = element_text(size=6),
+        axis.title       = element_blank(),
+        legend.key.width = unit(0.5, "cm")) +
+  
+  # coord_quickmap() +
+  coord_quickmap(xlim=xrange , ylim=yrange) +
+  geom_polygon(data=world.df, aes(long, lat, group=group), fill = "gray90") +
+  geom_point(aes(size=nhaul, colour=source), alpha = 0.4, shape=20) +
+  # geom_text(data=tt, aes(label = paste("n=", n)), colour="black",
+  #           x=-Inf, y=Inf, hjust=0, vjust=1, size=3) +
+  scale_size(range = c(0.01,5)) +
+  guides(colour = guide_legend(nrow = 1)) + 
+  labs(x = NULL, y = NULL, size = "t/haul", title="Number of hauls") +
+  # facet_wrap(~ month, ncol=6)
+  facet_grid(year ~ week)
+
+
+
+```
+
+Length comparison of herring
+
+```{r, echo=FALSE, fig.asp=1.4, fig.align="center", message=FALSE, warning=FALSE}
+
+l %>% 
+  filter(week %in% 23:35) %>% 
+  filter(species == "her") %>% 
+  mutate(header = paste(year,week,rect,sep="/")) %>% 
+  
+  ggplot(aes(x=length, y=prop, group=source)) +
+  theme_publication() +
+  geom_line(aes(colour=source)) +
+  facet_wrap(~header)
+
+
+
+```
+
